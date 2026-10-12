@@ -1,0 +1,160 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 問題管理
+// ============================================
+
+model Question {
+  id            Int      @id @default(autoincrement())
+  year          Int                            // 年度（例: 2023, 2024, 2025, 2026）
+  questionNo    Int                            // 1-100
+  category      Category                       // ストラテジ/マネジメント/テクノロジ
+  questionText  String                         // 問題文
+  choiceA       String                         // 選択肢ア
+  choiceB       String                         // 選択肢イ
+  choiceC       String                         // 選択肢ウ
+  choiceD       String                         // 選択肢エ
+  correctAnswer Answer                        // 正解（ア/イ/ウ/エ）
+  explanation   String?                        // 解説（後で追加可能）
+  difficulty    Int      @default(1)          // 難易度 1-5（後で分析して追加）
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  userAnswers   UserAnswer[]
+
+  @@unique([year, questionNo])               // 年度と問題番号の組み合わせで一意
+  @@index([category])
+  @@index([year])
+}
+
+enum Category {
+  STRATEGY      // ストラテジ系（問1-34）
+  MANAGEMENT    // マネジメント系（問35-54）
+  TECHNOLOGY    // テクノロジ系（問55-100）
+}
+
+enum Answer {
+  A  // ア
+  B  // イ
+  C  // ウ
+  D  // エ
+}
+
+// ============================================
+// ユーザー管理
+// ============================================
+
+model User {
+  id            Int      @id @default(autoincrement())
+  name          String
+  email         String   @unique
+  password      String?                        // NextAuth.js使用時はnull可
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  answers       UserAnswer[]
+  sessions      QuizSession[]
+  stats         UserStats?
+
+  @@index([email])
+}
+
+// ============================================
+// 回答履歴（個別の回答記録）
+// ============================================
+
+model UserAnswer {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  questionId     Int
+  selectedAnswer Answer                        // ユーザーが選んだ答え
+  isCorrect      Boolean                       // 正誤
+  answeredAt     DateTime @default(now())
+  sessionId      Int?                          // どのセッションでの回答か
+  timeSpent      Int?                          // 回答にかかった秒数（オプション）
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question       Question     @relation(fields: [questionId], references: [id])
+  session        QuizSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, questionId, sessionId])   // 同じセッション内で同じ問題に複数回答しない
+  @@index([userId, isCorrect])                // 間違えた問題抽出用
+  @@index([sessionId])
+}
+
+// ============================================
+// クイズセッション（10問単位の学習記録）
+// ============================================
+
+model QuizSession {
+  id             Int      @id @default(autoincrement())
+  userId         Int
+  mode           SessionMode @default(NORMAL)  // 通常 or 復習モード
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?                     // 完了時刻
+  totalQuestions Int      @default(10)         // 出題数
+  correctCount   Int      @default(0)          // 正解数
+  score          Float?                        // スコア（％）
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers        UserAnswer[]
+
+  @@index([userId, completedAt])
+  @@index([userId, mode])
+}
+
+enum SessionMode {
+  NORMAL   // 通常モード（ランダム10問）
+  REVIEW   // 復習モード（間違えた問題から10問）
+  CATEGORY // 分野別モード（特定カテゴリから10問）
+}
+
+// ============================================
+// ユーザー統計（集計データ）
+// ============================================
+
+model UserStats {
+  id                    Int      @id @default(autoincrement())
+  userId                Int      @unique
+  totalAnswered         Int      @default(0)  // 総回答数
+  totalCorrect          Int      @default(0)  // 総正解数
+  overallAccuracy       Float    @default(0)  // 全体正答率（％）
+
+  // 分野別統計
+  strategyAnswered      Int      @default(0)
+  strategyCorrect       Int      @default(0)
+  strategyAccuracy      Float    @default(0)
+
+  managementAnswered    Int      @default(0)
+  managementCorrect     Int      @default(0)
+  managementAccuracy    Float    @default(0)
+
+  technologyAnswered    Int      @default(0)
+  technologyCorrect     Int      @default(0)
+  technologyAccuracy    Float    @default(0)
+
+  // 学習状況
+  totalSessions         Int      @default(0)  // 総セッション数
+  lastStudiedAt         DateTime?             // 最後に学習した日時
+  currentStreak         Int      @default(0)  // 連続学習日数
+  longestStreak         Int      @default(0)  // 最長連続学習日数
+
+  updatedAt             DateTime @updatedAt
+
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
